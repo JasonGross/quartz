@@ -2,7 +2,7 @@
 From Ltac2 Require Import Ltac2 Array Constr Printf Proj Ind. Set Default Proof Mode "Classic". Module UConstr := Constr.Unsafe.
 From Stdlib Require Import BinInt Bits Vector String Ascii List DecimalString HexString NArith.
 Import ListNotations.
-From quartz.lang Require Import ident_to_string let_lift Syntax transform pp.
+From quartz.lang Require Import ident_to_string Syntax transform pp.
 
 Module sv.
   Local Open Scope bool_scope. Local Open Scope string_scope.
@@ -83,7 +83,7 @@ Module sv.
     | type.Bits sz => "bit" ++ dims ++ "["++pp_Z (sz - 1)++":0]"
     | type.Pair a b => "Pair#("++pp_type' a ""++", "++pp_type' b ""++")::t" ++ dims
     | type.Either a b => "Either#("++pp_type' a ""++", "++pp_type' b ""++")::t" ++ dims
-    | type.Struct name _ => name ++ dims
+    | type.Struct name nts => pp.mangle_struct_name name nts ++ dims
     | type.Array t' sz => pp_type' t' (dims ++ "["++pp_nat sz++"-1:0]")
     end.
 
@@ -99,7 +99,7 @@ Module sv.
   Fixpoint pp_typedefs (ts : list type) : string :=
     match ts with
     | nil => ""
-    | type.Struct n nts :: ts => pp_typedef n nts ++ pp_typedefs ts
+    | type.Struct n nts :: ts => pp_typedef (pp.mangle_struct_name n nts) nts ++ pp_typedefs ts
     | _ :: ts => pp_typedefs ts
     end.
 
@@ -127,7 +127,7 @@ Module sv.
               (if match rest with nil => true | _ => false end then "" else ", ") ++
               rest_str
           end
-        in fun s => name++"'{ "++pp_struct_val nts s++" }"
+        in fun s => pp.mangle_struct_name name nts++"'{ "++pp_struct_val nts s++" }"
     | type.Array t' sz =>
         let fix pp_vec {n} (v : Vector.t (type.interp t') n) : string :=
           match v in Vector.t _ n return string with
@@ -264,6 +264,9 @@ Module sv.
         pp_fn fname argname fn_body ++ ""++LF ++ pp_fns (C fname)
     | fns.Ret fname argname fn_body => pp_fn fname argname fn_body
     end.
+
+
+
 
   Local Open Scope string_scope.
 

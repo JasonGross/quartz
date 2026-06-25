@@ -2,7 +2,7 @@
 From Ltac2 Require Import Ltac2 Array Constr Printf Proj Ind. Set Default Proof Mode "Classic". Module UConstr := Constr.Unsafe.
 From Stdlib Require Import BinInt Bits Vector String Ascii List DecimalString HexString NArith.
 Import ListNotations.
-From quartz.lang Require Import ident_to_string let_lift Syntax transform pp.
+From quartz.lang Require Import ident_to_string Syntax transform pp.
 
 Module cpp.
   Local Open Scope bool_scope. Local Open Scope string_scope.
@@ -51,7 +51,7 @@ Module cpp.
         if (type.size a <=? 0)%Z || (type.size b <=? 0)%Z then "`error ""pair component must have positive size"" " else ""
     | type.Either a b =>
         if (type.size a <=? 0)%Z && (type.size b <=? 0)%Z then "`error ""one Either side must have positive size"" " else ""
-    | type.Struct name _ => valid_ident name
+    | type.Struct name nts => valid_ident (pp.mangle_struct_name name nts)
     | type.Array t' sz => ""
     end.
 
@@ -62,7 +62,7 @@ Module cpp.
     | type.Bits sz => "unsigned _BitInt("++pp_Z sz++")"
     | type.Pair a b => "std::pair<"++pp_type' a++", "++pp_type' b++">"
     | type.Either a b => "std::variant<"++pp_type' a++", "++pp_type' b++">"
-    | type.Struct name _ => name
+    | type.Struct name nts => pp.mangle_struct_name name nts
     | type.Array t sz => "std::array<"++pp_type' t++", "++pp_nat sz++">"
     end.
 
@@ -77,7 +77,7 @@ Module cpp.
   Fixpoint pp_typedefs (ts : list type) : string :=
     match ts with
     | nil => ""
-    | type.Struct n nts :: ts => pp_typedef n nts ++ pp_typedefs ts
+    | type.Struct n nts :: ts => pp_typedef (pp.mangle_struct_name n nts) nts ++ pp_typedefs ts
     | _ :: ts => pp_typedefs ts
     end.
 
@@ -104,7 +104,7 @@ Module cpp.
               (if match rest with nil => true | _ => false end then "" else ", ") ++
               rest_str
           end
-        in fun s => name++"{ "++pp_struct_val nts s++" }"
+        in fun s => pp.mangle_struct_name name nts++"{ "++pp_struct_val nts s++" }"
     | type.Array t' sz =>
         let fix pp_vec {n} (v : Vector.t (type.interp t') n) : string :=
           match v in Vector.t _ n return string with
@@ -225,6 +225,9 @@ Module cpp.
       "static "++pp_fn fname argname fn_body ++ ""++LF ++ pp_fns (C fname)
     | fns.Ret fname argname fn_body => pp_fn fname argname fn_body
     end.
+
+
+
 
   Local Open Scope string_scope.
 
