@@ -2,7 +2,6 @@
 From Ltac2 Require Import Ltac2 Array Constr Printf Proj Ind. Set Default Proof Mode "Classic". Module UConstr := Constr.Unsafe.
 From Stdlib Require Import BinInt Bits Vector String Ascii List DecimalString HexString NArith.
 Import ListNotations.
-From stdpp Require Import bitvector.definitions.
 From quartz.lang Require Import ident_to_string let_lift Syntax transform.
 
 Module sv.
@@ -11,7 +10,6 @@ Module sv.
   Definition fn (a b : type) := string.
 
   Definition pp_Z (n : Z) : string := NilZero.string_of_int (Z.to_int n).
-  Definition pp_N (n : N) : string := NilZero.string_of_int (N.to_int n).
   Definition pp_nat (n : nat) : string := NilZero.string_of_uint (Nat.to_uint n).
   Definition LF := "
 ".
@@ -63,28 +61,28 @@ Module sv.
     end.
 
   Definition valid_array (t' : type) : string :=
-    if (type.size t' <=? 0)%N then "`error ""array element must have positive size"" " else "".
+    if (type.size t' <=? 0)%Z then "`error ""array element must have positive size"" " else "".
 
   Definition valid_type_shallow (t : type) : string :=
     match t with
     | type.Unit => ""
-    | type.Bits sz => if (sz <? 0)%N then "`error ""bitwidth must be nonnegative"" " else ""
+    | type.Bits sz => if (sz <? 0)%Z then "`error ""bitwidth must be nonnegative"" " else ""
     | type.Pair a b =>
-        if (type.size a <=? 0)%N || (type.size b <=? 0)%N then "`error ""pair component must have positive size"" " else ""
+        if (type.size a <=? 0)%Z || (type.size b <=? 0)%Z then "`error ""pair component must have positive size"" " else ""
     | type.Either a b =>
-        if (type.size a <=? 0)%N && (type.size b <=? 0)%N then "`error ""either components cannot be both zero-sized"" " else ""
+        if (type.size a <=? 0)%Z && (type.size b <=? 0)%Z then "`error ""either components cannot be both zero-sized"" " else ""
     | type.Struct name _ => valid_ident name
     | type.Array t' sz => valid_array t'
     end.
 
   Definition valid_field (n : string) (t' : type) : string :=
-    if (type.size t' <=? 0)%N then "`error ""field " ++ n ++ " must have positive size"" " else "".
+    if (type.size t' <=? 0)%Z then "`error ""field " ++ n ++ " must have positive size"" " else "".
 
   Fixpoint pp_type' (t : type) (dims : string) : string :=
     valid_type_shallow t ++
     match t with
     | type.Unit => "unit" ++ dims
-    | type.Bits sz => "bit" ++ dims ++ "["++pp_N (sz - 1)++":0]"
+    | type.Bits sz => "bit" ++ dims ++ "["++pp_Z (sz - 1)++":0]"
     | type.Pair a b => "Pair#("++pp_type' a ""++", "++pp_type' b ""++")::t" ++ dims
     | type.Either a b => "Either#("++pp_type' a ""++", "++pp_type' b ""++")::t" ++ dims
     | type.Struct name _ => name ++ dims
@@ -110,7 +108,7 @@ Module sv.
   Fixpoint pp_const {t : type} : type.interp t -> string :=
     match t return type.interp t -> string with
     | type.Unit => fun b => "tt"
-    | type.Bits sz => fun v => pp_N sz++"'d"++pp_Z (bv_unsigned v)
+    | type.Bits sz => fun v => pp_Z sz++"'d"++pp_Z (Zmod.unsigned v)
     | type.Pair a b => fun p =>
         "Pair#("++pp_type a++", "++pp_type b++")::mk("++
         @pp_const a (fst p)++", "++@pp_const b (snd p)++")"
@@ -135,7 +133,7 @@ Module sv.
     | type.Array t' sz =>
         let fix pp_vec {n} (v : Vector.t (type.interp t') n) : string :=
           match v in Vector.t _ n return string with
-          | Vector.nil => ""
+          | Vector.nil _ => ""
           | @Vector.cons _ hd 0 tl => @pp_const t' hd
           | @Vector.cons _ hd (S n') tl => pp_vec tl++", "++@pp_const t' hd
           end
@@ -171,11 +169,11 @@ Module sv.
     | @unop.IsZero n => "(!"++e1_str++")"
     | @unop.Not n => "(~"++e1_str++")"
     | @unop.Opp n => "(-"++e1_str++")"
-    | @unop.Resize false n m => pp_N m ++ "'($unsigned("++e1_str++"))"
-    | @unop.Resize true n m => "$unsigned(" ++ pp_N m ++ "'($signed("++e1_str++")))"
+    | @unop.Resize false n m => pp_Z m ++ "'($unsigned("++e1_str++"))"
+    | @unop.Resize true n m => "$unsigned(" ++ pp_Z m ++ "'($signed("++e1_str++")))"
     | @unop.Left l r => "Either#("++pp_type l++", "++pp_type r++")::left("++e1_str++")"
     | @unop.Right l r => "Either#("++pp_type l++", "++pp_type r++")::right("++e1_str++")"
-    | @unop.Slice _ s l => pp_N l ++ "'((" ++ e1_str ++ ") >> " ++ pp_N s ++ ")"
+    | @unop.Slice _ s l => pp_Z l ++ "'((" ++ e1_str ++ ") >> " ++ pp_Z s ++ ")"
     end.
 
   Definition pp_binop {t1 t2 t3} (op : binop t1 t2 t3) (e1_str e2_str : string) : string :=
@@ -188,7 +186,7 @@ Module sv.
     | @binop.Slu n => "("++e1_str++" << "++e2_str++")"
     | @binop.Sru n => "("++e1_str++" >> "++e2_str++")"
     | @binop.Srs n => "$unsigned(($signed("++e1_str++") >>> "++e2_str++"))"
-    | @binop.Mul n m z => pp_N z ++ "'(" ++e1_str++" * "++e2_str++")"
+    | @binop.Mul n m z => pp_Z z ++ "'(" ++e1_str++" * "++e2_str++")"
     | @binop.EqBits n => "("++e1_str++" == "++e2_str++")"
     | @binop.Compare signed c n =>
         let op_str := match c with
@@ -199,7 +197,7 @@ Module sv.
         let e2_s := if signed then "$signed("++e2_str++")" else e2_str in
         "("++e1_s++" "++op_str++" "++e2_s++")"
     | @binop.MkPair a b => "Pair#("++pp_type a++", "++pp_type b++")::mk("++e1_str++", "++e2_str++")"
-    | @binop.App sz n m => pp_N sz ++ "'({"++e2_str++", "++e1_str++"})"
+    | @binop.App n m => "{"++e2_str++", "++e1_str++"}"
     end.
 
   Fixpoint pp_expr {t} (e : expr.expr var fn t) : string :=

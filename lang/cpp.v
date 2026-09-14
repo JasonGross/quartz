@@ -2,7 +2,6 @@
 From Ltac2 Require Import Ltac2 Array Constr Printf Proj Ind. Set Default Proof Mode "Classic". Module UConstr := Constr.Unsafe.
 From Stdlib Require Import BinInt Bits Vector String Ascii List DecimalString HexString NArith.
 Import ListNotations.
-From stdpp Require Import bitvector.definitions.
 From quartz.lang Require Import ident_to_string let_lift Syntax transform.
 
 Module cpp.
@@ -11,7 +10,6 @@ Module cpp.
   Definition fn (a b : type) := string.
 
   Definition pp_Z (n : Z) : string := NilZero.string_of_int (Z.to_int n).
-  Definition pp_N (n : N) : string := NilZero.string_of_int (N.to_int n).
 
   Definition pp_nat (n : nat) : string := NilZero.string_of_uint (Nat.to_uint n).
   Definition LF := "
@@ -50,11 +48,11 @@ Module cpp.
   Definition valid_type_shallow (t : type) : string :=
     match t with
     | type.Unit => ""
-    | type.Bits sz => if (sz <? 0)%N then "`error ""bitwidth must be nonnegative"" " else ""
+    | type.Bits sz => if (sz <? 0)%Z then "`error ""bitwidth must be nonnegative"" " else ""
     | type.Pair a b =>
-        if (type.size a <=? 0)%N || (type.size b <=? 0)%N then "`error ""pair component must have positive size"" " else ""
+        if (type.size a <=? 0)%Z || (type.size b <=? 0)%Z then "`error ""pair component must have positive size"" " else ""
     | type.Either a b =>
-        if (type.size a <=? 0)%N && (type.size b <=? 0)%N then "`error ""one Either side must have positive size"" " else ""
+        if (type.size a <=? 0)%Z && (type.size b <=? 0)%Z then "`error ""one Either side must have positive size"" " else ""
     | type.Struct name _ => valid_ident name
     | type.Array t' sz => ""
     end.
@@ -63,7 +61,7 @@ Module cpp.
     valid_type_shallow t ++
     match t with
     | type.Unit => "unit"
-    | type.Bits sz => "unsigned _BitInt("++pp_N sz++")"
+    | type.Bits sz => "unsigned _BitInt("++pp_Z sz++")"
     | type.Pair a b => "std::pair<"++pp_type' a++", "++pp_type' b++">"
     | type.Either a b => "std::variant<"++pp_type' a++", "++pp_type' b++">"
     | type.Struct name _ => name
@@ -88,7 +86,7 @@ Module cpp.
   Fixpoint pp_const {t : type} : type.interp t -> string :=
     match t return type.interp t -> string with
     | type.Unit => fun b => "unit{}"
-    | type.Bits sz => fun v => "(unsigned _BitInt("++pp_N sz++"))"++pp_Z (bv_unsigned v)
+    | type.Bits sz => fun v => "(unsigned _BitInt("++pp_Z sz++"))"++pp_Z (Zmod.unsigned v)
     | type.Pair a b => fun p =>
         "std::make_pair("++@pp_const a (fst p)++", "++@pp_const b (snd p)++")"
     | type.Either a b => fun e =>
@@ -112,7 +110,7 @@ Module cpp.
     | type.Array t' sz =>
         let fix pp_vec {n} (v : Vector.t (type.interp t') n) : string :=
           match v in Vector.t _ n return string with
-          | Vector.nil => ""
+          | Vector.nil _ => ""
           | @Vector.cons _ hd 0 tl => @pp_const t' hd
           | @Vector.cons _ hd (S n') tl => @pp_const t' hd++", "++pp_vec tl
           end
@@ -133,11 +131,11 @@ Module cpp.
     | @unop.IsZero n => "(!"++e1_str++")"
     | @unop.Not n => "(~"++e1_str++")"
     | @unop.Opp n => "(-"++e1_str++")"
-    | @unop.Resize false n m => "((unsigned _BitInt("++pp_N m++"))("++e1_str++"))"
-    | @unop.Resize true n m => "((unsigned _BitInt("++pp_N m++"))((signed _BitInt("++pp_N n++"))("++e1_str++")))"
+    | @unop.Resize false n m => "((unsigned _BitInt("++pp_Z m++"))("++e1_str++"))"
+    | @unop.Resize true n m => "((unsigned _BitInt("++pp_Z m++"))((signed _BitInt("++pp_Z n++"))("++e1_str++")))"
     | @unop.Left l r => "std::variant<"++pp_type l++", "++pp_type r++">(std::in_place_index<0>, "++e1_str++")"
     | @unop.Right l r => "std::variant<"++pp_type l++", "++pp_type r++">(std::in_place_index<1>, "++e1_str++")"
-    | @unop.Slice _ s l => "((unsigned _BitInt("++pp_N l++"))(("++e1_str++") >> "++pp_N s++"))"
+    | @unop.Slice _ s l => "((unsigned _BitInt("++pp_Z l++"))(("++e1_str++") >> "++pp_Z s++"))"
     end.
 
   Definition pp_binop {t1 t2 t3} (op : binop t1 t2 t3) (e1_str e2_str : string) : string :=
@@ -147,21 +145,21 @@ Module cpp.
     | @binop.And n => "("++e1_str++" & "++e2_str++")"
     | @binop.Or n => "("++e1_str++" | "++e2_str++")"
     | @binop.Xor n => "("++e1_str++" ^ "++e2_str++")"
-    | @binop.Slu n => "slu<"++pp_N n++">("++e1_str++", "++e2_str++")"
-    | @binop.Sru n => "sru<"++pp_N n++">("++e1_str++", "++e2_str++")"
-    | @binop.Srs n => "srs<"++pp_N n++">("++e1_str++", "++e2_str++")"
-    | @binop.Mul n m z => "(unsigned _BitInt("++pp_N z++"))("++e1_str++" * (unsigned _BitInt("++pp_N (N.max m z)++"))"++e2_str++")"
+    | @binop.Slu n => "slu<"++pp_Z n++">("++e1_str++", "++e2_str++")"
+    | @binop.Sru n => "sru<"++pp_Z n++">("++e1_str++", "++e2_str++")"
+    | @binop.Srs n => "srs<"++pp_Z n++">("++e1_str++", "++e2_str++")"
+    | @binop.Mul n m z => "(unsigned _BitInt("++pp_Z z++"))("++e1_str++" * (unsigned _BitInt("++pp_Z (Z.max m z)++"))"++e2_str++")"
     | @binop.EqBits n => "("++e1_str++" == "++e2_str++")"
     | @binop.Compare signed c n =>
         let op_str := match c with
           | binop.cLt => "<" | binop.cGt => ">"
           | binop.cLe => "<=" | binop.cGe => ">="
         end in
-        let e1_s := if signed then "((signed _BitInt("++pp_N n++"))"++e1_str++")" else e1_str in
-        let e2_s := if signed then "((signed _BitInt("++pp_N n++"))"++e2_str++")" else e2_str in
+        let e1_s := if signed then "((signed _BitInt("++pp_Z n++"))"++e1_str++")" else e1_str in
+        let e2_s := if signed then "((signed _BitInt("++pp_Z n++"))"++e2_str++")" else e2_str in
         "("++e1_s++" "++op_str++" "++e2_s++")"
     | @binop.MkPair a b => "std::make_pair("++e1_str++", "++e2_str++")"
-    | @binop.App sz n m => "((unsigned _BitInt("++pp_N sz++"))(((unsigned _BitInt("++pp_N (n+m)++"))"++e2_str++" << "++pp_N n++") | (unsigned _BitInt("++pp_N (n+m)++"))"++e1_str++"))"
+    | @binop.App n m => "((unsigned _BitInt("++pp_Z (n+m)++"))(((unsigned _BitInt("++pp_Z (n+m)++"))"++e2_str++") << "++pp_Z n++") | "++e1_str++")"
     end.
 
   Fixpoint pp_expr {t} (e : expr.expr var fn t) : string :=
