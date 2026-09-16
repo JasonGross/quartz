@@ -1,21 +1,18 @@
 From Ltac2 Require Import Ltac2 Array Constr Printf Proj Ind. Set Default Proof Mode "Classic". Module UConstr := Constr.Unsafe.
 #[export] Set Primitive Projections.
-From Stdlib Require Import Vector String List BinInt (* Bits  *)Datatypes. Import ListNotations.
+From Stdlib Require Import Vector String List BinInt Bits Datatypes. Import ListNotations.
 From quartz.lang Require Import domain ident_to_string let_lift.
-Import (coercions) domain.BV.
-
-From stdpp Require Import base bitvector.definitions vector.
+Import (coercions) domain.Zmod.
 
 Module type.
   Local Unset Elimination Schemes.
   Local Set Boolean Equality Schemes.
   Inductive type :=
-  | Bits (sz: N)
+  | Bits (sz: Z)
   | Pair (_ _ : type)
   | Either (_ _ : type)
   | Struct (name : string) (_ : list (string * type))
   | Array (t: type) (sz: nat).
-  Notation bits := bv.
   Notation Unit := (Bits 0) (only parsing).
   Notation Bool := (Bits 1) (only parsing).
   Fixpoint interp t : Type :=
@@ -24,7 +21,7 @@ Module type.
     | Pair a b => interp a * interp b
     | Either a b => interp a + interp b
     | Struct _ nts => fold_right (fun nt T => interp (snd nt) * T)%type unit nts
-    | Array t n => vec (interp t) n
+    | Array t n => Vector.t (interp t) n
     end.
   Definition interpfn a b := interp a -> interp b.
 
@@ -42,17 +39,15 @@ Module type.
     | cons (_, t) s => (default t, default_struct s)
     end.
   Context (t : type).
-  (* Fixpoint default_array (n : nat) := *)
-  (*   match n return Vector.t t n with *)
-  (*   | O => Vector.nil _ *)
-  (*   | S n => Vector.cons (type.interp t) (default t) n (default_array n) *)
-  (*   end. *)
-  Definition default_array (n : nat) : vec t n :=
-    fun_to_vec (fun _ => default t). 
+  Fixpoint default_array (n : nat) :=
+    match n return Vector.t t n with
+    | O => Vector.nil _
+    | S n => Vector.cons (type.interp t) (default t) n (default_array n)
+    end.
   End WithDefault.
   Fixpoint default (t : type) : t :=
     match t return t with
-    | Bits sz => Z_to_bv _ 0
+    | Bits sz => Zmod.zero
     | Pair a b => (default a, default b)
     | Either a b => inl (default a) (* TODO: confirm this *)
     | Struct _ s => default_struct default s
@@ -72,7 +67,7 @@ Module type.
         let rt1 := reify t1 in
         let rt2 := reify t2 in
         constr:(type.Either $rt1 $rt2)
-    | vec ?t ?n =>
+    | Vector.t ?t ?n =>
         let rt := reify t in
         constr:(type.Array $rt $n)
     | _ => match UConstr.kind t with UConstr.Ind ind inst =>
@@ -91,7 +86,7 @@ Module type.
   end end.
 
   Notation reify'' state := (ltac2:(let r := type.reify (pretype state) in exact $r)) (only parsing).
-  Definition tt : Unit := bv_0 _.
+  Definition tt : Unit := Zmod.zero.
 
   Fixpoint fieldType (s : struct) (n : string) : type :=
     match s with
@@ -161,21 +156,20 @@ Module unop.
   | Resize (signed : bool) {n m} : unop (Bits n) (Bits m) (* zero-extend or truncate *)
   | Left {l r} : unop l (Either l r)
   | Right {l r} : unop r (Either l r)
-  | Slice {n} (s l: N) : unop (Bits n) (Bits l)
+  | Slice {n} (s l: Z) : unop (Bits n) (Bits l)
   .
-  Open Scope bv_scope.
   Definition interp {a b} (op: unop a b) : type.interp a -> type.interp b :=
     match op in unop a b return a -> b with
-    | IsZero => fun v => bool_to_bv _ (bv_unsigned v =? 0 )%Z
-    | Not => bv_not 
-    | Opp => fun v => - v
+    | IsZero => fun v => Zmod.embed_bool (Zmod.eqb v Zmod.zero)
+    | Not => Zmod.not
+    | Opp => Zmod.opp
     | Resize signed =>
         if signed
-        then fun v => Z_to_bv _ (bv_signed v)
-        else fun v => Z_to_bv _ (bv_unsigned v)
+        then fun v => bits.of_Z _ (Zmod.signed v)
+        else fun v => bits.of_Z _ (Zmod.unsigned v)
     | Left => inl
     | Right => inr
-    | Slice s l => fun v => bv_extract s l v
+    | Slice s l => fun v => Zmod.firstn l (Zmod.skipn s v)
     end.
 
   Definition UnsignedResize {n m} := @Resize false n m.
@@ -199,27 +193,25 @@ Module binop.
   | EqBits {n} : binop (Bits n) (Bits n) Bool
   | Compare (signed: bool) (c: compare) {n} : binop (Bits n) (Bits n) Bool
   | MkPair {a b: type} : binop a b (Pair a b)
-  | App (sz: N) {n m} : binop (Bits n) (Bits m) (Bits sz).
-  Open Scope bv_scope.
+  | App {n m} : binop (Bits n) (Bits m) (Bits (n + m)).
   Definition interp {a b c} (op: binop a b c) : a -> b -> c :=
     match op in binop a b c return a -> b -> c with
-    | Add => bv_add
-    | Sub => fun x y => x - y
-    | And => bv_and
-    | Or => bv_or
-    | Xor => bv_xor
-    | Slu => fun a b => bv_shiftl a b
-    | Sru => fun a b => bv_shiftr a b 
-    | Srs => fun a b => bv_ashiftr a b
-    | @Mul _ _ z => fun a b => Z_to_bv z (Z.mul (bv_unsigned a) (bv_unsigned b))
-    | EqBits => fun a b => bool_to_bv _ (bv_unsigned a =? bv_unsigned b)%Z
+    | Add => Zmod.add
+    | Sub => Zmod.sub
+    | And => Zmod.and
+    | Or => Zmod.or
+    | Xor => Zmod.xor
+    | Slu => fun a b => Zmod.slu a (Zmod.unsigned b)
+    | Sru => fun a b => Zmod.sru a (Zmod.unsigned b)
+    | Srs => fun a b => Zmod.srs a (Zmod.unsigned b)
+    | @Mul _ _ z => fun a b => bits.of_Z z (Z.mul (Zmod.unsigned a) (Zmod.unsigned b))
+    | EqBits => fun a b => Zmod.embed_bool (Zmod.eqb a b)
     | Compare signed c => fun a b =>
         match c with cLt => Z.ltb | cGt => Z.gtb | cLe => Z.leb | cGe => Z.geb end
-        (if signed then bv_signed a else bv_unsigned a)
-        (if signed then bv_signed b else bv_unsigned b)
+        (if signed then Zmod.signed a else Zmod.unsigned a)
+        (if signed then Zmod.signed b else Zmod.unsigned b)
     | MkPair => Datatypes.pair
-    | @App sz n m => (* fun x y => *) (* TODO: check semantics *)
-              bv_concat sz
+    | App => Zmod.app
     end.
 End binop.
 Notation binop := binop.binop (only parsing).
@@ -231,7 +223,7 @@ Module typeWithHole.
   | PairR (t1 : type) (t2: typeWithHole)
   | Struct (sn : string) (l : struct) (n : string) (t : typeWithHole) (r : struct)
      {NoDup_by_fun_eq_refl : forall t, struct.fieldType (l ++ (n, t) :: r) n = t}
-  | Array (sz : nat) (t : typeWithHole) (index_width : N).
+  | Array (sz : nat) (t : typeWithHole) (index_width : Z).
 
   Fixpoint plug (C : typeWithHole) (t : type) : type :=
     match C with
@@ -256,7 +248,7 @@ Module typeWithHole.
     | PairR a b => fun _ r i => get b _ (snd r) i
     | @Struct _ _ n t _ pf => fun _ r i => get t _ (eq_rect _ _ (struct.get n r) _ (pf _)) i
     | Array sz t _ => fun _ r i => get t _
-        (List.nth_default (default _) (Vector.to_list r) (Z.to_nat (bv_unsigned (fst i)))) (snd i)
+        (List.nth_default (default _) (Vector.to_list r) (Z.to_nat (Zmod.unsigned (fst i)))) (snd i)
     end.
   Arguments get {_ _}.
 
@@ -268,7 +260,7 @@ Module typeWithHole.
     | @Struct _ _ n t _ pf => fun _ r i f =>
         struct.upd n r (eq_rect (plug t _) (fun u => u -> u) (fun v => upd t _ v i f) _ (eq_sym (pf _)))
     | Array sz t _ => fun _ r i f =>
-        Vector.upd r (Z.to_nat (bv_unsigned (fst i))) 
+        Vector.upd r (Z.to_nat (Zmod.unsigned (fst i)))
                      (fun r => upd _ _ r (snd i) f)
     end.
   Arguments upd {_ _}.
@@ -316,10 +308,10 @@ Module expr.
     | If (_ : @expr Bool) (a b : @expr t)
     | Call {a} (_ : fn a t) (_ : @expr a).
 
-    Definition tt := @Const Unit (bv_0 _).
+    Definition tt := @Const Unit Zmod.zero.
     Definition true := @Const Bool true.
     Definition false := @Const Bool false.
-    Definition zero {n} := @Const (Bits n) (bv_0 _).
+    Definition zero {n} := @Const (Bits n) Zmod.zero.
   End WithSubstitutionType.
   Arguments expr : clear implicits.
 
@@ -341,7 +333,7 @@ Module expr.
   Notation "# v" := (expr.Var v) (in custom quartz_expr at level 0, v constr at level 0, format "'#' v").
   Notation "$ v" := v (in custom quartz_expr at level 0, v constr at level 0, format "'$' v").
   (* Notation "x" := (x) (in custom quartz_expr at level 0, x global). *)
-  Notation "sz ''d' val" := (expr.Const (t:=Bits sz) (Z_to_bv _ val))
+  Notation "sz ''d' val" := (expr.Const (t:=Bits sz) (bits.of_Z _ val))
     (in custom quartz_expr at level 0, sz constr at level 0, val constr at level 0, format "sz ''d' val").
   Notation "'const' c" := (expr.Const c) (in custom quartz_expr at level 0, c constr at level 0).
   Notation "f '(' e ')'" := (expr.Call f e)
@@ -392,7 +384,7 @@ Module expr.
   Notation "e1 .> e2" := (expr.Binop (binop.Compare Datatypes.true binop.cGt) e1 e2) (in custom quartz_expr at level 70, no associativity).
   Notation "e1 .>= e2" := (expr.Binop (binop.Compare Datatypes.true binop.cGe) e1 e2) (in custom quartz_expr at level 70, no associativity).
 
-  Notation "e1 ++ e2" := (expr.Binop (binop.App _) e1 e2) (in custom quartz_expr at level 50, left associativity).
+  Notation "e1 ++ e2" := (expr.Binop binop.App e1 e2) (in custom quartz_expr at level 50, left associativity).
 
   Notation "'if' cond 'then' a 'else' b" := (expr.If cond a b)
     (in custom quartz_expr at level 200, cond custom quartz_expr at level 200, a custom quartz_expr at level 200, b custom quartz_expr at level 200).
@@ -512,7 +504,7 @@ Module fn.
       return ( #y + 8 'd (-1) ))).
     Definition cycle {var} := Fn (var:=var) (fun z => quartz_eexpr:(
       let r := pred ( succ ( #z ) ) in return #r)).
-    Lemma interp_cycle : interp cycle = fun z => (z + Z_to_bv _ 1 + Z_to_bv _ (-1))%bv.
+    Lemma interp_cycle : interp cycle = fun z => (z + bits.of_Z _ 1 + bits.of_Z _ (-1))%Zmod.
     Proof.
       cbn [cycle            interp body eexpr.interp eexpr_map_fn expr.interp expr_map_fn binop.interp].
       (* = (fun v : Bits 8 => interp pred (interp succ v)) *)
@@ -521,9 +513,7 @@ Module fn.
       trivial.
     Qed.
     Lemma ok_cycle z : interp cycle z = z.
-    Proof. rewrite interp_cycle, <-bv_add_assoc.
-           rewrite bv_add_0_r ; auto.
-    Qed.
+    Proof. rewrite interp_cycle, <-Zmod.add_assoc, (Zmod.of_Z_opp 1), Zmod.add_0_r; trivial. Qed.
   End Private_example_global_fn.
 
   Module Private_example_global_polyfn. (* polymorphic functions can't be packaged yet *)
@@ -534,12 +524,10 @@ Module fn.
       return ( #y + _ 'd (-1) ))).
     Definition cycle {var} := Fn (var:=var) (fun z => quartz_eexpr:(
       let r := pred ( succ ( #z ) ) in return #r)).
-    Lemma interp_cycle : interp cycle = fun z => (z + Z_to_bv _ 1 + Z_to_bv _ (-1))%bv.
+    Lemma interp_cycle : interp cycle = fun z => (z + bits.of_Z _ 1 + bits.of_Z _ (-1))%Zmod.
     Proof. cbn [cycle pred succ  interp body eexpr.interp eexpr_map_fn expr.interp expr_map_fn binop.interp]. trivial. Qed.
     Lemma ok_cycle z : interp cycle z = z.
-    Proof. rewrite interp_cycle, <-bv_add_assoc. 
-           rewrite bv_add_0_r ; auto.
-    Qed.
+    Proof. rewrite interp_cycle, <-Zmod.add_assoc, (Zmod.of_Z_opp 1), Zmod.add_0_r; trivial. Qed.
   End Private_example_global_polyfn.
 End fn.
 
@@ -704,17 +692,13 @@ Module fifo1. Section fifo1.
   Coercion rep (v : state) : type.reify'' state :=
     ltac2:(let t := struct.rep &v in exact $t).
 
-  Lemma empty_ok (s : state) : fn.interp empty s = (bv_unsigned s.(valid) =? 0)%Z.
+  Lemma empty_ok (s : state) : fn.interp empty s = Zmod.eqb s.(valid) Zmod.zero.
   Proof. trivial. Qed.
 
   Lemma not_full_and_empty (st : state) :
     fn.interp empty st <> fn.interp full st.
   Proof.
-    cbn.
-    case (BV.bool_cases (valid st)); vm_compute bool_decide; 
-      cbv[bool_to_bv]; discriminate.
-    (* cbn -[Zmod.eqb]. (* reduces [#st..valid] in [length] even though [t] is abstract. *) *)
-    (* (* embed_bool (Zmod.eqb 0 (valid st)) <> valid st *) case (Zmod.bool_cases (valid st)); cbv; congruence. *)
+    cbn -[Zmod.eqb]. case (Zmod.bool_cases (valid st)); cbv; congruence.
   Qed.
 End fifo1. End fifo1.
 
