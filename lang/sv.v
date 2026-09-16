@@ -214,12 +214,12 @@ Module sv.
     | @eexpr.Ret _ _ _ exp => (ind ++ out_var ++ " = " ++ pp_expr exp ++ ";", id)
     | @eexpr.Let _ _ name_hint tx a _ aC =>
         let vname := name_hint ++ "_" ++ pp_nat id in
-        let stmt1 := ind ++ "begin " ++ pp_type tx ++ " " ++ vname ++ " = " ++ pp_expr a ++ ";" in
+        let stmt1 := ind ++ valid_ident name_hint ++ "begin " ++ pp_type tx ++ " " ++ vname ++ " = " ++ pp_expr a ++ ";" in
         let '(stmt2, id') := pp_eexpr ind (aC vname) out_var (S id) in
         (stmt1 ++ ""++LF ++ stmt2 ++ " end", id')
     | @eexpr.Bind _ _ name_hint tx a _ aC =>
         let vname := name_hint ++ "_" ++ pp_nat id in
-        let stmt_decl := ind ++ "begin " ++ pp_type tx ++ " " ++ vname ++ ";" in
+        let stmt_decl := ind ++ valid_ident name_hint ++ "begin " ++ pp_type tx ++ " " ++ vname ++ ";" in
         let '(stmt1, id1) := pp_eexpr ind a vname (S id) in
         let '(stmt2, id2) := pp_eexpr ind (aC vname) out_var id1 in
         (stmt_decl ++ ""++LF ++ stmt1 ++ ""++LF ++ stmt2 ++ " end", id2)

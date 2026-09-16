@@ -384,8 +384,8 @@ Module bht. Section bht.
      let st := #p .1 in let pc := #p .2 .1 in let taken := #p .2 .2 in
      let index := getIndex ( #pc ) in
      let entry := #st[#index] in
-     let dp' := newDP ( (#entry, #taken) ) in
-     let st <- #st[#index] = #dp' in
+     let dp_next := newDP ( (#entry, #taken) ) in
+     let st <- #st[#index] = #dp_next in
      return #st
   )).
 
@@ -450,12 +450,12 @@ Module btb. Section btb.
     let lookup_tag := #st..tags[#index] in
     if ~ (#nextPc == defaultNextPc (#pc)) then
       (* TODO: updating a submodule array *)
-      let valid' <- (#st..valid)[#index] = true in            
-      let targets' <- (#st..targets)[#index] = #nextPc in            
-      let tags' <- (#st..tags)[#index] = #tag in            
-      let st <- #st..valid = #valid' in
-      let st <- #st..targets = #targets' in
-      let st <- #st..tags = #tags' in
+      let valid_upd <- (#st..valid)[#index] = true in            
+      let targets_upd <- (#st..targets)[#index] = #nextPc in            
+      let tags_upd <- (#st..tags)[#index] = #tag in            
+      let st <- #st..valid = #valid_upd in
+      let st <- #st..targets = #targets_upd in
+      let st <- #st..tags = #tags_upd in
       return #st
     else
       return #st                                            
